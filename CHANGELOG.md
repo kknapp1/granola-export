@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.0] — fork: kknapp1/granola-export
+
+Adds a second, cross-platform exporter on Granola's official public API. The macOS exporter (`scripts/extract.py`, `scripts/api.py`) is unchanged.
+
+### Added
+
+- **`scripts/extract_public.py`**: exporter for `public-api.granola.ai/v1` (OpenAPI v1.7.0), authenticated with a `grn_` API key read from `GRANOLA_API_KEY`. Works on Windows, Linux and macOS; stdlib only.
+  - **Output layout**: one directory per Granola folder, flattened, with each note in its most specific folder and `Unfiled/` for notes in no folder. Inside, one directory per note holds `<Note>.json` (the raw API response) and `<Note>.md` (Markdown with a YAML header). It also writes `INDEX.md`, `folders.json`, `spaces.json` and `manifest.json`.
+  - **Note content**: summary (Markdown), the owner's private notes, attendees, calendar event, folders and spaces, and transcripts with speaker attribution. When a transcript is too large (HTTP 413), it is fetched through the paged transcript endpoint.
+  - **Incremental sync**: `--since-last-run` uses a watermark stored in `manifest.json`, with a 15-minute overlap. The watermark advances only after an unscoped run with no failures. Unchanged notes are skipped by `updated_at` and produce byte-identical files.
+  - **Renames and moves** in Granola relocate the note's directory, including its attachments, on the next run.
+  - **Exit codes** for automation: 0 = ok, 1 = partial failure (data saved), 2 = configuration error, 3 = fatal API error.
+  - **Other flags**: `--attachments` (opt-in), `--render-only` (offline re-layout), `--list-folders`, the `--folder-id` / `--space-id` / `--created-*` / `--updated-after` filters, `--refetch`, `--no-transcripts`, `--skip-render` and `--version`.
+  - **Hardening**: ids are validated before use in paths. API requests never follow redirects, so the key can't be forwarded. Attachments are https-only, size-capped, typed by content-type, and downloaded without sending the key. Output is UTF-8 on Windows consoles.
+- **`docs/scheduled-backup.md`** and **`examples/github-actions/granola-backup.yml`**: daily incremental backup into a private GitHub repo.
+- **`tests/test_extract_public.py`**: layout, relocation and end-to-end tests against a local fake API. **CI** runs on Ubuntu and Windows with Python 3.10 and 3.13.
+- **README**: Windows setup instructions; **CLAUDE.md** for AI coding agents.
+
 ## [0.1.0]
 
 Initial public release. Built from observing how Granola Mac app v7.155.1 talks to its backend.

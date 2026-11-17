@@ -1,0 +1,79 @@
+# Template for a PRIVATE backup repository — copy to .github/workflows/granola-backup.yml there.
+# Do not enable this in the public granola-export repo.
+#
+# One-time setup in the private repo:
+#   1. Settings -> Secrets and variables -> Actions -> New repository secret:
+#        GRANOLA_API_KEY = grn_...
+#   2. Settings -> Actions -> General -> Workflow permissions: "Read and write permissions"
+#      (or keep the explicit `permissions: contents: write` below).
+#   3. Add `notes/_incoming/` to .gitignore (crash-recovery staging; normally empty).
+#
+# What it does: checks out the exporter at a pinned tag, exports notes that changed since the
+# last successful run into notes/, and commits only when a note actually changed.
+name: Granola backup
+
+on:
+  schedule:
+    - cron: "23 7 * * *"        # daily, 07:23 UTC — pick an off-the-hour minute
+  workflow_dispatch:
+    inputs:
+      full:
+        description: "Full export instead of since-last-run"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: granola-backup         # never run two exports against the same tree at once
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Check out backup repo
+        uses: actions/checkout@v4
+
+      - name: Check out exporter (pinned release)
+        uses: actions/checkout@v4
+        with:
+          repository: kknapp1/granola-export
+          ref: v0.2.0           # bump deliberately after reading the CHANGELOG
+          path: .exporter       # hidden dir: never scanned for notes, never committed
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Export new and changed notes
+        id: export
+        continue-on-error: true # exit 1 = some notes failed but the rest were saved; commit them first
+        env:
+          GRANOLA_API_KEY: ${{ secrets.GRANOLA_API_KEY }}
+        run: |
+          mode="--since-last-run"
+          if [ "${{ inputs.full }}" = "true" ]; then mode=""; fi
+          python .exporter/scripts/extract_public.py --dest notes $mode --attachments
+
+      - name: Commit changes
+        run: |
+          # manifest.json changes on every run; commit only when a note changed. Skipping a
+          # manifest-only commit is safe: the next run just re-lists from the older watermark.
+          if [ -z "$(git status --porcelain -- notes ':(exclude)notes/manifest.json')" ]; then
+            echo "No note changes."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add notes
+          git commit -q -m "Granola backup $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push
+
+      - name: Fail the run if the export reported errors
+        if: steps.export.outcome == 'failure'
+        run: |
+          echo "::error::Exporter exited non-zero (1 = some notes failed, 2 = config/missing key, 3 = API error). See the export step log."
+          exit 1

@@ -1,5 +1,7 @@
 # granola-export
 
+> **Fork of [moona3k/granola-export](https://github.com/moona3k/granola-export)** that adds a cross-platform exporter built on Granola's official public API. It is the one to use on **Windows**, and it supports [scheduled backups to a private GitHub repo](docs/scheduled-backup.md). Jump to [Windows setup](#windows-and-linuxmacos-the-public-api-exporter). The original macOS exporter (`scripts/extract.py`) is unchanged.
+
 Recover your own [Granola.ai](https://granola.ai) data — meeting notes, full transcripts, AI summaries, and attachments — via Granola's REST API, using the auth tokens already stored locally by the Mac app.
 
 ## What Granola offers natively, and where this script fits
@@ -78,13 +80,13 @@ If your account is on a paid tier, the paywalled endpoints work automatically �
 
 ## Quick start
 
-Requirements:
+Requirements (macOS exporter; on Windows/Linux see the public-API exporter below):
 - macOS with the Granola desktop app installed and logged in
 - Python 3.10+
 - ~10 minutes
 
 ```bash
-git clone https://github.com/moona3k/granola-export
+git clone https://github.com/kknapp1/granola-export
 cd granola-export
 python3 scripts/extract.py
 ```
@@ -93,7 +95,93 @@ Output appears in `~/reference/granola/extracted/my-data/`.
 
 The script is **idempotent** — re-run anytime to top up new documents without re-fetching existing ones.
 
-## Token expiry
+## Windows (and Linux/macOS): the public-API exporter
+
+`scripts/extract.py` (above) is **macOS-only**: on Windows the Granola app stores its session encrypted (`%APPDATA%\Granola\supabase.json.enc`), so there is no token file to read. `scripts/extract_public.py` is a separate, cross-platform exporter. It is built on Granola's **official** public API ([docs.granola.ai](https://docs.granola.ai)) and authenticates with an API key you create yourself. It uses no local app files, only the Python standard library.
+
+### Requirements
+
+- A Granola **Business or Enterprise** plan, which is required to create API keys.
+- Python 3.10 or newer.
+
+### Windows setup
+
+1. **Install Python** if `py --version` doesn't print 3.10 or newer:
+   ```powershell
+   winget install Python.Python.3.12
+   ```
+   Open a new terminal afterwards. On Windows, `py` (the Python launcher) is the most reliable command, and `python` also works when it's on PATH.
+2. **Get the code:**
+   ```powershell
+   git clone https://github.com/kknapp1/granola-export
+   cd granola-export
+   ```
+3. **Create an API key** in the Granola desktop app under Settings → Connectors → API keys.
+   - **Scopes:** A personal key can read notes you own, notes shared with you (the "Personal notes" scope), and notes in workspace-visible folders ("Public notes"). Select both for a full backup.
+   - **Workspace keys:** Admins can create these instead (Settings → Connectors → Workspace API keys).
+4. **Make the key available.** Never pass the key on the command line, where it would land in your shell history. Use one of these:
+   ```powershell
+   # For this terminal session only:
+   $env:GRANOLA_API_KEY = "grn_..."
+
+   # Or persist it for your Windows user (stored in plain text in your user environment;
+   # open a new terminal, or restart VS Code, before it takes effect):
+   [Environment]::SetEnvironmentVariable("GRANOLA_API_KEY", "grn_...", "User")
+   ```
+5. **Run it:**
+   ```powershell
+   py scripts/extract_public.py --list-folders           # show your folder ids
+   py scripts/extract_public.py --folder-id <fol_id>     # try one small folder first
+   py scripts/extract_public.py --attachments            # full backup, including image attachments
+   py scripts/extract_public.py --since-last-run         # afterwards: only what changed since the last run
+   ```
+   Output goes to `.\granola-data` by default. Use `--dest D:\Backups\granola` to put it elsewhere. Avoid deeply nested destinations, because Windows limits full paths to 260 characters.
+
+### Output
+
+There is one directory per Granola folder, and one directory per note. Each note directory holds the raw JSON, which is the source of truth, and an agent-readable Markdown version:
+
+```
+granola-data/
+├── Team Sync/
+│   └── Weekly planning (2026-03-08)/
+│       ├── Weekly planning (2026-03-08).json   raw API response: summary, your notes, transcript, attendees, calendar, folders
+│       └── Weekly planning (2026-03-08).md     metadata header, summary, notes, attendees, transcript
+├── 1-1/ ...
+├── Unfiled/              notes that are in no Granola folder
+├── INDEX.md   folders.json   spaces.json   manifest.json
+```
+
+- **Nested folders are flattened.** Each note goes in its most specific Granola folder.
+- **Names:** Repeated titles get a date suffix, and names are Windows-safe (`1:1` becomes `1-1`).
+- **Re-runs are incremental.** A note is re-fetched only when its `updated_at` changed. `--since-last-run` also limits the listing to notes changed since the last successful run.
+- **Renames and moves follow Granola.** If a title or folder changes in Granola, the files are moved to match.
+- **Offline re-render.** `--render-only` rebuilds the layout and Markdown from the saved JSON with no key or network.
+- **Interruptions are safe.** Each fetched note is saved immediately, so an interrupted run loses nothing.
+- **Attachments** (`--attachments`) are opt-in, https-only and size-capped. They are saved under `<Note>/attachments/`. Their URLs expire, so they must be downloaded during the run.
+- **Rate limits** (5 requests per second) are respected, with retries on HTTP 429.
+- **Exit codes:**
+
+  | Code | Meaning |
+  |---|---|
+  | 0 | Success |
+  | 1 | Some notes failed; the rest were saved |
+  | 2 | Configuration problem, such as a missing key |
+  | 3 | Fatal API error |
+
+**Limits versus the macOS exporter:**
+
+- The public API returns only notes that have a generated AI summary.
+- It has no endpoints for recipes, templates, people profiles, or the original-vs-edited summary versions.
+- Enterprise admins can disable transcript access for member keys.
+
+For a backup, compare the number of notes in the app with the number of `.json` files exported.
+
+### Scheduled backups
+
+To keep an always-current archive in a **private GitHub repo**, see [docs/scheduled-backup.md](docs/scheduled-backup.md). It covers a ready-to-copy GitHub Actions workflow, how the incremental watermark works, and a Windows Task Scheduler alternative.
+
+## Token expiry (macOS exporter)
 
 Granola's WorkOS access token has a ~1-hour TTL. If `extract.py` errors with "WorkOS access token expired":
 
@@ -109,10 +197,10 @@ The repo doubles as a Claude-Code-format skill. Drop it where your agent looks:
 
 ```bash
 # Claude Code
-git clone https://github.com/moona3k/granola-export ~/.claude/skills/granola-export
+git clone https://github.com/kknapp1/granola-export ~/.claude/skills/granola-export
 
 # Codex (or any agent following the same skill convention)
-git clone https://github.com/moona3k/granola-export
+git clone https://github.com/kknapp1/granola-export
 ln -s "$PWD/granola-export/SKILL.md" "${CODEX_HOME:-$HOME/.codex}/skills/granola-export/SKILL.md"
 ```
 
@@ -167,7 +255,7 @@ PRs welcome for:
 - New endpoint discoveries (Granola changes, new categories of recoverable data)
 - Drift fixes when the API changes
 - Output format improvements (e.g. better INDEX.md, JSON-Lines option, etc.)
-- Cross-platform support (Windows / Linux file paths — currently macOS-only)
+- Cross-platform support for the private-API exporter (Windows / Linux token locations — currently macOS-only; `extract_public.py` already runs anywhere)
 
 Out of scope:
 - Anything that runs against accounts the user does not own
@@ -179,6 +267,6 @@ Out of scope:
 
 ## Author
 
-Maintained by [@moona3k](https://github.com/moona3k), built collaboratively with [Claude Code](https://docs.claude.com/en/docs/claude-code/) — discovery, framing, and decisions on this end; most of the Python and docs on Claude's. Also maintainer of [MacParakeet](https://github.com/moona3k/macparakeet) — a fast, private, local-first voice app for Mac.
+This fork (public-API exporter, Windows support, scheduled backups) is maintained by [@kknapp1](https://github.com/kknapp1). The original project is by [@moona3k](https://github.com/moona3k), built collaboratively with [Claude Code](https://docs.claude.com/en/docs/claude-code/) — discovery, framing, and decisions on this end; most of the Python and docs on Claude's. Also maintainer of [MacParakeet](https://github.com/moona3k/macparakeet) — a fast, private, local-first voice app for Mac.
 
 If you're switching off Granola for privacy or cost reasons, MacParakeet is one option; there are others. The principle is the same: your meetings, your data, your machine.

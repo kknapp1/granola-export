@@ -179,7 +179,9 @@ If your account is on a paid tier, the skill will succeed on the paywalled endpo
 
 ## Operating environment
 
-Built and tested on macOS 14+ with Granola Mac app v7.155.1 (April 2026). The auth-token file path is macOS-specific. For Windows/Linux, you'd need to find the equivalent (`%APPDATA%\Granola\` on Windows; the WorkOS auth flow is the same).
+Built and tested on macOS 14+ with Granola Mac app v7.155.1 (April 2026). The auth-token file path is macOS-specific. On Windows the app stores it encrypted (`%APPDATA%\Granola\supabase.json.enc`), so this flow does not work there.
+
+**On Windows/Linux, or on a Business/Enterprise plan anywhere**, use `scripts/extract_public.py` instead. It calls Granola's official public API with a `grn_` key from the `GRANOLA_API_KEY` env var. Run `python scripts/extract_public.py --help`, and see the README's Windows section and `docs/scheduled-backup.md`.
 
 ## See also
 
